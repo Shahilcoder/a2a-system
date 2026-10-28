@@ -1,0 +1,68 @@
+x-env: &env
+  REDIS_URL: redis://redis:6379/0
+
+x-app: &app
+  build: .
+  image: a2a-system
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./src:/app/src
+    - ./tests:/app/tests
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  mcp-server:
+    <<: *app
+    command: mcp-server
+    ports: ["8004:8000"]
+
+  information-agent:
+    <<: *app
+    command: information
+    ports: ["8002:8000"]
+    environment:
+      <<: *env
+      AGENT_PUBLIC_URL: http://localhost:8002
+      MCP_SERVER_URL: http://mcp-server:8000/mcp
+    depends_on: [redis, mcp-server]
+
+  coding-agent:
+    <<: *app
+    command: coding
+    ports: ["8003:8000"]
+    environment:
+      <<: *env
+      AGENT_PUBLIC_URL: http://localhost:8003
+      # LLM_MODEL: a-bigger-coding-model   # per-agent model override
+    depends_on: [redis]
+
+  sprout:
+    <<: *app
+    command: sprout
+    ports: ["8001:8000"]
+    environment:
+      <<: *env
+      AGENT_PUBLIC_URL: http://localhost:8001
+      REMOTE_AGENT_URLS: http://information-agent:8000,http://coding-agent:8000
+    depends_on: [redis, information-agent, coding-agent]
+
+  gateway:
+    <<: *app
+    command: gateway
+    ports: ["8080:8000"]
+    environment:
+      SPROUT_URL: http://sprout:8000
+    depends_on: [sprout]
+
+  # docker compose --profile test run --rm tests [pytest args]
+  tests:
+    <<: *app
+    profiles: [test]
+    entrypoint: ["pytest"]
+    restart: "no"
